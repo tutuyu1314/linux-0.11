@@ -103,7 +103,7 @@ __asm__("std ; repne ; scasb\n\t"   // 置方向位，al(0)与对应每个页面
 	"addl %2,%%ecx\n\t"             // 再加上低端内存地址，得页面实际物理起始地址
 	"movl %%ecx,%%edx\n\t"          // 将页面实际其实地址->edx寄存器。
 	"movl $1024,%%ecx\n\t"          // 寄存器ecx置计数值1024
-	"leal 4092(%%edx),%%edi\n\t"    // 将4092+edx的位置->dei（该页面的末端地址）
+	"leal 4092(%%edx),%%edi\n\t"    // 将4092+edx的位置->edi（该页面的末端地址）
 	"rep ; stosl\n\t"               // 将edi所指内存清零(反方向，即将该页面清零)
 	"movl %%edx,%%eax\n"            // 将页面起始地址->eax（返回值）
 	"1:"
@@ -501,6 +501,7 @@ static int try_to_share(unsigned long address, struct task_struct * p)
     // 的页目录项，即可最后得到当前进程中地址address处页面所对应的4G线性空间中的
     // 实际页目录项to_page。
 	from_page = to_page = ((address>>20) & 0xffc);
+	//HaoR begin:from_page，to_page也是页目录项；
 	from_page += ((p->start_code>>20) & 0xffc);
 	to_page += ((current->start_code>>20) & 0xffc);
     // 在得到p进程和当前进程address对应的目录项后，下面分别对进程p和当前进程进行
@@ -511,9 +512,12 @@ static int try_to_share(unsigned long address, struct task_struct * p)
     // 对应的页表项指针，并取出该页表项内容临时保存在phys_addr中。
 /* is there a page-directory at from? */
 	from = *(unsigned long *) from_page;
+	//HaoR begin:查看页表的P位置是否为1；P=0，说明from页表不在内存中，直接返回；
 	if (!(from & 1))
 		return 0;
 	from &= 0xfffff000;
+	//HaoR begin：from是也目录项；((address>>10) & 0xffc)是页表在页目录中的偏移项；
+	//from_page对应物理页的首地址；
 	from_page = from + ((address>>10) & 0xffc);
 	phys_addr = *(unsigned long *) from_page;
 /* is the page clean and present? */
@@ -521,6 +525,7 @@ static int try_to_share(unsigned long address, struct task_struct * p)
     // 和P（present）标志。如果页面不干净或无效则返回。然后我们从该表项中取出物
     // 理页面地址再保存在phys_addr中。最后我们再检查一下这个物理页面地址的有效性，
     // 即它不应该超过机器最大物理地址值，也不应该小于内存低端(1 MB).
+	//HaoR begin:0x41=1000001,第6位是dirty位；dirty位=1，说明是脏页，直接返回；
 	if ((phys_addr & 0x41) != 0x01)
 		return 0;
 	phys_addr &= 0xfffff000;
@@ -532,6 +537,8 @@ static int try_to_share(unsigned long address, struct task_struct * p)
     // 页表不存在，则申请一空闲页面来存放页表，并更新目录项to_page内容，让其指向
     // 内存页面。
 	to = *(unsigned long *) to_page;
+	//HaoR begin:P=0，跳进if分支；然后获取一个空闲的物理页；获取空闲物理页成功
+	//后用7置位；
 	if (!(to & 1)) {
 		if ((to = get_free_page()))
 			*(unsigned long *) to_page = to | 7;
@@ -542,7 +549,9 @@ static int try_to_share(unsigned long address, struct task_struct * p)
     // 得到页表地址->to_page.针对页表项，如果我们此时我们检查出其对应的物理页面
     // 已经存在，即页表的存在位P=1，则说明原本我们想共享进程p中对应的物理页面，
     // 但现在我们自己已经占有了(映射有)物理页面。于是说明内核出错，死机。
+	//HaoR begin:to是页目录项目，对低12位清零；
 	to &= 0xfffff000;
+	//HaoR begin:页目录项，进行偏移；可得到页表的地址；
 	to_page = to + ((address>>10) & 0xffc);
 	if (1 & *(unsigned long *) to_page)
 		panic("try_to_share: to_page already exists");
@@ -553,6 +562,7 @@ static int try_to_share(unsigned long address, struct task_struct * p)
     // 处页面即被映射到p进程逻辑地址address处页面映射的物理页面上。
 /* share them: write-protect */
 	*(unsigned long *) from_page &= ~2;
+	//HaoR begin:修改页表中的内容，使其与要共享的页表的内容相同；
 	*(unsigned long *) to_page = *(unsigned long *) from_page;
     // 随后刷新页变换高速缓冲。计算所操作屋里页面的页面号，并将对应页面映射字节数
     // 组项中的引用递增1。最后返回1，表示共享处理成功。

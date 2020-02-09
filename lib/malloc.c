@@ -48,15 +48,19 @@
 #include <linux/kernel.h>
 #include <linux/mm.h>
 #include <asm/system.h>
-
+//HaoR begin
+//内存块描述符；
+//HaoR end
 struct bucket_desc {	/* 16 bytes */
-	void			*page;
-	struct bucket_desc	*next;
+	void			*page;	//HaoR：内存块所对应的页表的首地址；
+	struct bucket_desc	*next;	//HaoR：链表结构，指向的下一个内存描述符；
 	void			*freeptr;
-	unsigned short		refcnt;
-	unsigned short		bucket_size;
+	unsigned short		refcnt;	//HaoR：内存块被引用次数；
+	unsigned short		bucket_size;	//HaoR：内存块大小；
 };
-
+//HaoR begin
+//内存块目录；包含了内存块链表表头；
+//HaoR end
 struct _bucket_dir {	/* 8 bytes */
 	int			size;
 	struct bucket_desc	*chain;
@@ -98,10 +102,15 @@ static inline void init_bucket_desc()
 {
 	struct bucket_desc *bdesc, *first;
 	int	i;
-	
+	//HaoR begin
+	//页地址转化为内存块指针；first存储的是物理页的首地址；可以通过first获取链表表头；
+	//HaoR end
 	first = bdesc = (struct bucket_desc *) get_free_page();
 	if (!bdesc)
 		panic("Out of memory in init_bucket_desc()");
+	//HaoR begin
+	//一个物理页的大小为：4096；计算出一个物理页能够存储块描述符的最大数量；
+	//HaoR end
 	for (i = PAGE_SIZE/sizeof(struct bucket_desc); i > 1; i--) {
 		bdesc->next = bdesc+1;
 		bdesc++;
@@ -111,6 +120,9 @@ static inline void init_bucket_desc()
 	 * get_free_page() sleeps and this routine gets called again....
 	 */
 	bdesc->next = free_bucket_desc;
+	//HaoR begin
+	//free_bucket_desc指向的未被使用的内存描述符；
+	//HaoR end
 	free_bucket_desc = first;
 }
 
@@ -137,7 +149,7 @@ void *malloc(unsigned int len)
 	 */
 	cli();	/* Avoid race conditions */
 	for (bdesc = bdir->chain; bdesc; bdesc = bdesc->next) 
-		if (bdesc->freeptr)
+		if (bdesc->freeptr) 	//HaoR begin:找一个内存块描述符，内存块描述符有剩余空间；
 			break;
 	/*
 	 * If we didn't find a bucket with free space, then we'll 
@@ -146,13 +158,19 @@ void *malloc(unsigned int len)
 	if (!bdesc) {
 		char		*cp;
 		int		i;
-
+		//HaoR begin
+		//如果free_bucket_desc=0；说明已经没有空闲的内存块描述符；
+		//需要重新申请一块，init_bucket_desc就是重新申请一块；
+		//HaoR end
 		if (!free_bucket_desc)	
 			init_bucket_desc();
 		bdesc = free_bucket_desc;
 		free_bucket_desc = bdesc->next;
 		bdesc->refcnt = 0;
 		bdesc->bucket_size = bdir->size;
+		//HaoR begin
+		//为内存块描述符的页分配一块物理页；
+		//HaoR end
 		bdesc->page = bdesc->freeptr = (void *) cp = get_free_page();
 		if (!cp)
 			panic("Out of memory in kernel malloc()");
